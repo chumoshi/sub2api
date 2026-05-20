@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Allow: /home
+Allow: /login
+Allow: /register
+
+Disallow: /dashboard
+Disallow: /admin
+Disallow: /api/
+Disallow: /setup/
+Disallow: /v1/

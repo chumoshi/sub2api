@@ -13,6 +13,8 @@ export default {
     // User-focused value proposition
     heroSubtitle: 'One Key, All AI Models',
     heroDescription: 'No need to manage multiple subscriptions. Access Claude, GPT, Gemini and more with a single API key',
+    seoKeywords:
+      'AI API,API gateway,Claude,GPT,Gemini,LLM,subscription to API,AI proxy,pay as you go',
     tags: {
       subscriptionToApi: 'Subscription to API',
       stickySession: 'Session Persistence',

@@ -397,13 +397,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
+import { setHomePageSeo } from '@/utils/pageSeo'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const authStore = useAuthStore()
 const appStore = useAppStore()
@@ -411,7 +412,9 @@ const appStore = useAppStore()
 // Site settings - directly from appStore (already initialized from injected config)
 const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || 'Sub2API')
 const siteLogo = computed(() => appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '')
-const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || 'AI API Gateway Platform')
+const siteSubtitle = computed(
+  () => appStore.cachedPublicSettings?.site_subtitle || t('home.heroSubtitle')
+)
 const docUrl = computed(() => appStore.cachedPublicSettings?.doc_url || appStore.docUrl || '')
 const homeContent = computed(() => appStore.cachedPublicSettings?.home_content || '')
 
@@ -437,6 +440,20 @@ const userInitial = computed(() => {
 // Current year for footer
 const currentYear = computed(() => new Date().getFullYear())
 
+function updatePageSeo(): void {
+  const currentLocale = locale.value === 'en' ? 'en' : 'zh'
+  setHomePageSeo({
+    title: `${siteName.value} - ${siteSubtitle.value}`,
+    description: t('home.heroDescription'),
+    siteName: siteName.value,
+    image: siteLogo.value || '/logo.png',
+    locale: currentLocale,
+    keywords: t('home.seoKeywords')
+  })
+}
+
+watch([siteName, siteSubtitle, siteLogo, locale], updatePageSeo)
+
 // Toggle theme
 function toggleTheme() {
   isDark.value = !isDark.value
@@ -457,6 +474,7 @@ function initTheme() {
 }
 
 onMounted(() => {
+  updatePageSeo()
   initTheme()
 
   // Check auth state
