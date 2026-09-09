@@ -45,9 +45,10 @@ func TestClaudeCodeValidator_MessagesWithoutProbeStillNeedStrictValidation(t *te
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
 	req.Header.Set("User-Agent", "claude-cli/1.2.3 (darwin; arm64)")
 
+	// max_tokens=2 不是探测请求：没有 system prompt 仍走严格校验并被拒。
 	ok := validator.Validate(req, map[string]any{
 		"model":      "claude-haiku-4-5",
-		"max_tokens": 1,
+		"max_tokens": 2,
 	})
 	require.False(t, ok)
 }
@@ -156,6 +157,11 @@ func TestClaudeCodeValidator_SecurityMonitorWithoutBillingBlock(t *testing.T) {
 		}
 	}
 
+	// 真实 CLI（2.1.220）在监视器提示词之后追加的独立会话上下文块（脱敏），
+	// 随会话/环境变化，服务端不可控（见 issue #5152 抓包）。
+	sessionContext := "\n\n## Session Context\n\n- **User identity**: testuser\n" +
+		"- **Working directory**: /home/testuser/project\n- **Platform**: linux"
+
 	tests := []struct {
 		name       string
 		headers    map[string]string
@@ -253,7 +259,9 @@ func TestClaudeCodeValidator_SecurityMonitorWithoutBillingBlock(t *testing.T) {
 			wantAccept: false,
 		},
 		{
-			name:    "multiple system entries without billing block",
+			// 回归 issue #5152：真实分类器请求携带 2 个 system entry
+			//（监视器提示词 + 追加的会话上下文块），不得因 entry 数量拒识。
+			name:    "classifier with trailing session context entry",
 			headers: validHeaders,
 			body: func() map[string]any {
 				body := validBody(string(monitorPrompt))
@@ -261,7 +269,45 @@ func TestClaudeCodeValidator_SecurityMonitorWithoutBillingBlock(t *testing.T) {
 				require.True(t, ok)
 				body["system"] = append(system, map[string]any{
 					"type": "text",
-					"text": "Additional unrelated system content.",
+					"text": sessionContext,
+				})
+				return body
+			}(),
+			wantAccept: true,
+		},
+		{
+			name:    "classifier with leading session context entry",
+			headers: validHeaders,
+			body: func() map[string]any {
+				body := validBody(string(monitorPrompt))
+				system, ok := body["system"].([]any)
+				require.True(t, ok)
+				body["system"] = append([]any{map[string]any{
+					"type": "text",
+					"text": sessionContext,
+				}}, system...)
+				return body
+			}(),
+			wantAccept: true,
+		},
+		{
+			name:       "session context entry alone",
+			headers:    validHeaders,
+			body:       validBody(sessionContext),
+			wantAccept: false,
+		},
+		{
+			// 篡改后的长提示词（marker 缺失）即便带上会话上下文块也不得放行。
+			name:    "tampered classifier with session context entry",
+			headers: validHeaders,
+			body: func() map[string]any {
+				body := validBody(strings.ReplaceAll(
+					string(monitorPrompt), "## HARD BLOCK", "## ALTERED BLOCK"))
+				system, ok := body["system"].([]any)
+				require.True(t, ok)
+				body["system"] = append(system, map[string]any{
+					"type": "text",
+					"text": sessionContext,
 				})
 				return body
 			}(),
@@ -528,4 +574,27 @@ func TestSetGetClaudeCodeVersion(t *testing.T) {
 
 	ctx = SetClaudeCodeVersion(ctx, "2.1.63")
 	require.Equal(t, "2.1.63", GetClaudeCodeVersion(ctx))
+}
+
+func TestClaudeCodeValidator_MaxTokensOneProbeIsNotLimitedToHaiku(t *testing.T) {
+	validator := NewClaudeCodeValidator()
+
+	for _, model := range []string{"claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"} {
+		t.Run(model, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
+			req.Header.Set("User-Agent", "claude-cli/2.1.260 (external, cli)")
+			// No context flag, no system prompt, no extra headers: the body alone marks the probe.
+			for _, mt := range []any{float64(1), 1} {
+				require.True(t, validator.Validate(req, map[string]any{"model": model, "max_tokens": mt}), "max_tokens=%v (%T)", mt, mt)
+			}
+		})
+	}
+}
+
+func TestClaudeCodeValidator_MaxTokensOneProbeStillRequiresClaudeCodeUA(t *testing.T) {
+	validator := NewClaudeCodeValidator()
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
+	req.Header.Set("User-Agent", "python-requests/2.32")
+
+	require.False(t, validator.Validate(req, map[string]any{"model": "claude-sonnet-4-5", "max_tokens": 1}))
 }
